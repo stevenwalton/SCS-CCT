@@ -4,6 +4,119 @@ import torch.nn.functional as F
 from .stochastic_depth import DropPath
 
 
+class SCSConv2d(Module):
+    def __init__(self,
+                 in_channels=1,
+                 out_channels=1,
+                 kernel_size=1,
+                 stride=1,
+                 padding=0,
+                 eps=1e-6,
+                 ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.padding = int(padding)
+        self.eps = eps
+
+        w = torch.empty(out_channels, in_channels, kernel_size, kernel_size)
+        init.xavier_uniform_(w)
+        self.w = Parameter(w.view(out_channels, in_channels, -1), requires_grad=True)
+
+        self.p_scale = 10
+        p_init = 2**0.5 * self.p_scale
+        self.p = Parameter(torch.empty(out_channels))
+        init.constant_(self.p, p_init)
+
+        self.q_scale = 100
+        self.q = Parameter(torch.empty(1))
+        init.constant_(self.q, 10)
+
+    def forward(self, x):
+        w = self.w.reshape(self.out_channels,
+                           self.in_channels,
+                           kernel_size,
+                           kernel_size)
+        w_norm = torch.linalg.vector_norm(w, dim=(1,2,3), keepdim=True,)
+        q_sqr = (self.q / self.q_scale) ** 2
+        w_normed = w / ((w_norm + self.eps) + q_sqr)
+
+        x_norm_squared = F.avgpool2d(x**2,
+                                     kernel_size=self.kernel_size,
+                                     stride=self.stride,
+                                     padding=self.padding,
+                                     divisor_overide=1).sum(dim=1, keepdim=True)
+
+        y_denorm = F.conv2d(x,
+                            w_normed,
+                            bias=None,
+                            stride=self.stride,
+                            padding=self.padding)
+
+        y = y_denorm / ((x_norm_squared + self.eps).sqrt() + q_sqr)
+        sign = torch.sign(y)
+        p_sqr = (self.p / self.p_scale) ** 2
+        y = y.pow(p_sqr.reshape(1, -1, 1, 1))
+        return sign * y
+
+class SCSAttention(Module):
+    def __init__(self,
+                 dim,
+                 num_heads=1,
+                 attention_dropout=0.1,
+                 projection_dropout=0.1,
+                 ):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // self.num_heads
+        self.head_dim = head_dim
+        self.scale = head_dim ** -0.5
+
+        self.qkv = Linear(dim, dim * 3, bias=False)
+        self.attn_drop = Dropout(attention_dropout)
+        self.proj = Linear(dim, dim)
+        self.proj_drop = Dropout(projection_dropout)
+
+        #self.filter = Parameter(torch.ones(1, 1, 1, 1, requires_grad=True))
+        #self.filter = 0.001
+        self.filter = Parameter(torch.zeros(1, requires_grad=True))
+        init.constant_(self.filter, 10)
+        self.filter_scale = 100
+        #self.p = Parameter(torch.ones(1, requires_grad=True))
+        #self.p = Parameter(torch.ones(1, requires_grad=True))
+        #self.p = 2
+        self.p_scale = 10
+        #pinit = torch.tensor(2**0.5 * self.p_scale) * torch.ones(num_heads, head_dim, head_dim)
+        #pinit = torch.tensor(2**0.5 * self.p_scale) * torch.ones(num_heads)
+        #pinit = torch.tensor(2) * torch.ones(num_heads, requires_grad=False)
+        #init.constant(self.p, pinit)
+        #self.p = Parameter(torch.empty(1, dim, 1, 1, 1))
+        #self.p = Parameter(pinit)
+        #self.p = 2**0.5 * self.p_scale
+        self.p = 50
+
+    def forward(self, x):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv.chunk(3, dim=0)
+        attn = q @ k.transpose(-2, -1)
+        sign = torch.sign(attn)
+        qnorm = torch.linalg.norm(q, dim=(1,2,3), keepdim=True) + self.filter / self.filter_scale
+        knorm = torch.linalg.norm(k, dim=(1,2,3), keepdim=True) + self.filter / self.filter_scale
+        attn = attn / (qnorm * knorm)
+        #print(f"attn {attn.shape}, p {self.p.shape}, num_heads {self.num_heads}")
+        #attn = attn ** self.p.view(1, 1, self.num_heads, self.head_dim, self.head_dim)
+        #attn = attn ** self.p.view(1, 1, -1, 1, 1)
+        attn = attn ** self.p
+        attn = self.attn_drop(attn)
+
+        x = (sign * (attn @ v)).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+
 class Attention(Module):
     """
     Obtained from timm: github.com:rwightman/pytorch-image-models
@@ -79,7 +192,8 @@ class TransformerEncoderLayer(Module):
                  attention_dropout=0.1, drop_path_rate=0.1):
         super(TransformerEncoderLayer, self).__init__()
         self.pre_norm = LayerNorm(d_model)
-        self.self_attn = Attention(dim=d_model, num_heads=nhead,
+        #self.self_attn = Attention(dim=d_model, num_heads=nhead,
+        self.self_attn = SCSAttention(dim=d_model, num_heads=nhead,
                                    attention_dropout=attention_dropout, projection_dropout=dropout)
 
         self.linear1 = Linear(d_model, dim_feedforward)

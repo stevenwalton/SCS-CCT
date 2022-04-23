@@ -1,3 +1,8 @@
+# Sharpened Cosine Similarity For Compact Transformers
+The original compact transformer (CCT) repo can be found
+[here](https://github.com/SHI-Labs/Compact-Transformers). In this fork we test
+Sharpened Cosine Similarity in the attention mechanism.
+
 # Compact Transformers
 
 	

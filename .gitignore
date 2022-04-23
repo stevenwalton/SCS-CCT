@@ -1,0 +1,4 @@
+*.sw?
+__*__
+wandb/
+output

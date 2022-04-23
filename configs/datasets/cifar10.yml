@@ -1,4 +1,4 @@
-dataset: cifar10
+dataset: torch/cifar10
 num_classes: 10
 img_size: 32
 mean:
@@ -37,3 +37,5 @@ warmup_lr: 0.00001
 opt: adamw
 smoothing: 0.1
 workers: 8
+experiment: SCSCCT
+log_wandb: true
