@@ -1,8 +1,14 @@
 # Sharpened Cosine Similarity For Compact Transformers
 The original compact transformer (CCT) repo can be found
 [here](https://github.com/SHI-Labs/Compact-Transformers). In this fork we test
-Sharpened Cosine Similarity in the attention mechanism.
+Sharpened Cosine Similarity in the attention mechanism. We only tested on the
+small version of CCT but found that there was roughly a 4% decrease in
+performance on CIFAR-10. We tried severl values of q and p, including learnable
+and found it was best to learn q
 
+![compare](images/SCSvsNorm.png)
+
+We are including the main README for CCT below.
 # Compact Transformers
 
 	
